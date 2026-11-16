@@ -1,0 +1,370 @@
+
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>4 Player Arena X</title>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;font-family:Arial,sans-serif;color:white;
+ background:radial-gradient(circle at top,#243b70,#090d1c 65%);
+ min-height:100vh;padding:20px;
+}
+.container{max-width:850px;margin:auto}
+header{text-align:center;padding:20px}
+h1{font-size:36px;color:#55eaff;text-shadow:0 0 20px #00bfff}
+.subtitle{color:#b9c9ed}
+.card{
+ background:#141e35;border:1px solid #34496e;
+ border-radius:18px;padding:20px;margin:15px 0;
+ box-shadow:0 8px 30px #0005;
+}
+input{
+ width:100%;padding:14px;border-radius:10px;
+ border:1px solid #52688e;background:#0b1427;
+ color:white;font-size:16px;margin:8px 0;
+}
+button{
+ border:0;border-radius:10px;padding:13px 18px;
+ font-size:15px;font-weight:bold;cursor:pointer;
+ background:#00c8ee;color:#061322;margin:5px;
+}
+button:hover{filter:brightness(1.15)}
+button:disabled{opacity:.4;cursor:not-allowed}
+.secondary{background:#8c65ff;color:white}
+.danger{background:#ff526c;color:white}
+.actions{display:flex;flex-wrap:wrap;gap:8px}
+.actions button{flex:1}
+.room{
+ font-size:32px;letter-spacing:7px;color:#55eaff;
+ font-weight:bold;text-align:center;padding:12px;
+}
+.status{text-align:center;color:#b9d2ff;padding:10px}
+.players{
+ display:grid;grid-template-columns:repeat(2,1fr);gap:12px;
+}
+.player{
+ background:#202f4d;padding:15px;border-radius:12px;
+ border:1px solid #435a7d;text-align:center;
+}
+.player.me{border:2px solid #00dcff}
+.player h3{margin:5px 0;color:#70eaff}
+.score{font-size:30px;font-weight:bold;color:#fff}
+.tap{
+ width:190px;height:190px;border-radius:50%;
+ font-size:28px;background:linear-gradient(135deg,#00d9ff,#7654ff);
+ color:white;display:block;margin:20px auto;
+ box-shadow:0 0 35px #00bfff88;
+}
+.tap:active{transform:scale(.94)}
+.timer{text-align:center;font-size:42px;color:#ffdf65;font-weight:bold}
+.hidden{display:none!important}
+.small{font-size:12px;color:#a9b9d6}
+#winner{text-align:center;font-size:23px;color:#ffdc62}
+@media(max-width:500px){
+ h1{font-size:27px}
+ .players{grid-template-columns:1fr 1fr}
+ .card{padding:14px}
+ .tap{width:160px;height:160px}
+}
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+ <h1>⚔️ 4 PLAYER ARENA X</h1>
+ <p class="subtitle">REAL TIME MULTIPLAYER BATTLE</p>
+</header>
+
+<div class="card" id="setup">
+ <h2>🎮 Start Playing</h2>
+ <input id="name" maxlength="15" placeholder="अपना नाम लिखें">
+ <div class="actions">
+  <button onclick="createRoom()">➕ Create Room</button>
+  <button class="secondary" onclick="showJoin()">🔗 Join Room</button>
+ </div>
+
+ <div id="joinBox" class="hidden">
+  <input id="roomInput" maxlength="6" placeholder="6 Digit Room Code">
+  <button onclick="joinRoom()">Join Game</button>
+ </div>
+ <p class="small">एक Room में अधिकतम 4 खिलाड़ी खेल सकते हैं।</p>
+</div>
+
+<div class="card hidden" id="game">
+ <div class="status" id="connection">Connecting...</div>
+ <h3 style="text-align:center">ROOM CODE</h3>
+ <div class="room" id="roomCode">------</div>
+ <div class="actions">
+  <button class="secondary" onclick="copyRoom()">📋 Copy Room Code</button>
+ </div>
+ <h3>👥 Players</h3>
+ <div class="players" id="players"></div>
+ <div class="timer" id="timer">30</div>
+ <p class="status" id="gameStatus">Host के गेम शुरू करने का इंतजार करें...</p>
+ <div id="hostControls" class="actions hidden">
+  <button onclick="startGame()">🚀 Start Game</button>
+ </div>
+ <button class="tap" id="tapButton" onclick="tap()" disabled>👆 TAP!</button>
+ <div id="winner"></div>
+ <p class="small" style="text-align:center">हर TAP पर 1 पॉइंट मिलेगा।</p>
+ <button class="danger" onclick="leaveGame()">Leave Room</button>
+</div>
+
+</div>
+
+<script>
+let peer=null;
+let connections=[];
+let host=false;
+let room="";
+let myId="";
+let myName="";
+let myKey="";
+let players={};
+let playing=false;
+let endsAt=0;
+let tick=null;
+let remaining=30;
+
+const $=id=>document.getElementById(id);
+
+function randomID(){
+ return String(Math.floor(100000+Math.random()*900000));
+}
+
+function showJoin(){
+ $("joinBox").classList.toggle("hidden");
+}
+
+function setupGame(){
+ $("setup").classList.add("hidden");
+ $("game").classList.remove("hidden");
+ $("roomCode").textContent=room;
+}
+
+function createRoom(){
+ if(!window.Peer){alert("PeerJS load नहीं हुआ। Internet चेक करें।");return;}
+ myName=$("name").value.trim()||"Player 1";
+ myId=randomID();
+ myKey="host";
+ room=String(Math.floor(100000+Math.random()*900000));
+ host=true;
+ players={
+  host:{key:"host",id:myId,name:myName,score:0}
+ };
+ setupGame();
+ $("hostControls").classList.remove("hidden");
+ $("connection").textContent="Room बना रहे हैं...";
+ peer=new Peer("arena4-"+room);
+ peer.on("open",()=>{
+  $("connection").textContent="🟢 Room Online";
+  render();
+ });
+ peer.on("connection",conn=>{
+  connections.push(conn);
+  conn.on("data",data=>{
+   if(data.type==="join"){
+    if(Object.keys(players).length>=4){
+     conn.send({type:"full"});
+     conn.close();
+     return;
+    }
+    if(Object.values(players).some(p=>p.id===data.id)){
+     conn.send({type:"full"});
+     conn.close();
+     return;
+    }
+    players[conn.peer]={
+     key:conn.peer,id:data.id,
+     name:data.name,score:0
+    };
+    conn.send({type:"welcome",myId:data.id});
+    broadcast();
+    render();
+   }
+   if(data.type==="tap"){
+    addPoint(conn.peer);
+   }
+  });
+  conn.on("close",()=>{
+   delete players[conn.peer];
+   connections=connections.filter(c=>c!==conn);
+   broadcast();render();
+  });
+ });
+ peer.on("error",e=>{
+  $("connection").textContent="Error: "+e.type;
+ });
+}
+
+function joinRoom(){
+ if(!window.Peer){alert("Internet या PeerJS की समस्या है।");return;}
+ myName=$("name").value.trim()||"Player";
+ room=$("roomInput").value.trim();
+ if(!/^\d{6}$/.test(room)){
+  alert("6 Digit Room Code डालें");return;
+ }
+ myId=randomID();
+ myKey="";
+ setupGame();
+ $("connection").textContent="Connecting to room...";
+ $("roomCode").textContent=room;
+ $("hostControls").classList.add("hidden");
+ peer=new Peer();
+
+ peer.on("open",()=>{
+  const conn=peer.connect("arena4-"+room);
+  connections=[conn];
+  conn.on("open",()=>{
+   conn.send({type:"join",id:myId,name:myName});
+   $("connection").textContent="🟢 Connected";
+  });
+  conn.on("data",data=>{
+   if(data.type==="full"){
+    alert("Room भरा हुआ है या Room Code गलत है!");
+    leaveGame();return;
+   }
+   if(data.type==="welcome"){
+    myKey="guest";
+   }
+   if(data.type==="state"){
+    players=data.players;
+    playing=data.playing;
+    remaining=data.remaining;
+    render();
+   }
+  });
+  conn.on("close",()=>{
+   $("connection").textContent="🔴 Host से कनेक्शन टूट गया";
+   $("tapButton").disabled=true;
+  });
+ });
+ peer.on("error",e=>{
+  $("connection").textContent="Connection Error: "+e.type;
+ });
+}
+
+function broadcast(){
+ const data={
+  type:"state",players:players,
+  playing:playing,remaining:remaining
+ };
+ connections.forEach(c=>{
+  if(c.open)c.send(data);
+ });
+}
+
+function render(){
+ $("players").innerHTML="";
+ Object.values(players).forEach(p=>{
+  const div=document.createElement("div");
+  div.className="player"+(p.id===myId?" me":"");
+  const name=document.createElement("h3");
+  name.textContent=p.name+(p.id===myId?" (You)":"");
+  const id=document.createElement("div");
+  id.className="small";
+  id.textContent="ID: "+p.id;
+  const score=document.createElement("div");
+  score.className="score";
+  score.textContent=p.score;
+  div.append(name,id,score);
+  $("players").appendChild(div);
+ });
+ $("timer").textContent=remaining;
+ $("tapButton").disabled=!playing;
+ if(host){
+  $("gameStatus").textContent=playing?"🔥 Battle चल रही है!":"खिलाड़ी जुड़ने के बाद Start दबाएं।";
+ }
+}
+
+function startGame(){
+ if(!host)return;
+ if(Object.keys(players).length<2){
+  alert("कम से कम 2 खिलाड़ी जरूरी हैं!");
+  return;
+ }
+ if(playing)return;
+ Object.values(players).forEach(p=>p.score=0);
+ playing=true;
+ remaining=30;
+ endsAt=Date.now()+30000;
+ $("winner").textContent="";
+ broadcast();
+ render();
+
+ clearInterval(tick);
+ tick=setInterval(()=>{
+  remaining=Math.max(0,Math.ceil((endsAt-Date.now())/1000));
+  if(remaining<=0){
+   playing=false;
+   clearInterval(tick);
+   finishGame();
+  }else{
+   $("timer").textContent=remaining;
+  }
+  broadcast();
+ },250);
+}
+
+function addPoint(key){
+ if(!host||!playing||!players[key])return;
+ players[key].score++;
+ render();
+ broadcast();
+}
+
+function tap(){
+ if(!playing)return;
+ if(host){
+  addPoint("host");
+ }else{
+  const conn=connections[0];
+  if(conn&&conn.open)conn.send({type:"tap"});
+ }
+}
+
+function finishGame(){
+ remaining=0;
+ const list=Object.values(players);
+ const max=Math.max(...list.map(p=>p.score));
+ const winners=list.filter(p=>p.score===max);
+ $("winner").textContent=
+  winners.length>1
+  ?"🤝 Match Draw! "+winners.map(p=>p.name).join(", ")
+  :"🏆 Winner: "+winners[0].name+"!";
+ $("gameStatus").textContent="🏁 Game Over!";
+ $("tapButton").disabled=true;
+ broadcast();
+ if(host)$("hostControls").classList.remove("hidden");
+}
+
+function copyRoom(){
+ navigator.clipboard.writeText(room)
+ .then(()=>alert("Room Code Copied: "+room))
+ .catch(()=>alert("Room Code: "+room));
+}
+
+function leaveGame(){
+ clearInterval(tick);
+ if(peer)peer.destroy();
+ peer=null;
+ connections=[];
+ players={};
+ host=false;
+ playing=false;
+ room="";
+ $("setup").classList.remove("hidden");
+ $("game").classList.add("hidden");
+ $("winner").textContent="";
+ $("joinBox").classList.add("hidden");
+ $("roomInput").value="";
+}
+
+</script>
+</body>
+</html>
